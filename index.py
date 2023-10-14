@@ -1,15 +1,38 @@
-from transformers import VitsModel, AutoTokenizer
+from transformers import DetrImageProcessor, DetrForObjectDetection
 import torch
-import soundfile as sf
+from PIL import Image, ImageDraw, ImageFont
+import requests
 
-model = VitsModel.from_pretrained("facebook/mms-tts-eng")
-tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-eng")
 
-text = "hello, world"
+url = "http://images.cocodataset.org/val2017/000000039769.jpg"
+image = Image.open(requests.get(url, stream=True).raw)
 
-inputs = tokenizer(text, return_tensors="pt")
-with torch.no_grad():
-    output = model(**inputs).waveform
+processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50")
+model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50")
 
-audio = output.squeeze().numpy()
-sf.write("output_audio.wav", audio, 22050)
+inputs = processor(images=image, return_tensors="pt")
+outputs = model(**inputs)
+
+sizes = torch.tensor([image.size[::-1]])
+results = processor.post_process_object_detection(outputs, sizes=sizes, threshold=0.9)[0]
+
+
+font = ImageFont.load_default()
+draw = ImageDraw.Draw(image)
+
+for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
+    box = [round(i, 2) for i in box.tolist()]
+    class_name = model.config.id2label[label.item()]
+    confidence = round(score.item(), 3)
+    
+    
+    draw.rectangle(box, outline="cyan", width=3)
+
+    
+    draw.text((box[0], box[1] - 20), class_name, fill="green", font=font)
+
+
+image.save("detected_image.jpg")
+
+
+image.show()
